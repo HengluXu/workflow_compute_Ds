@@ -1,0 +1,64 @@
+log             log.lammps append	# append: to extend
+units           real				# 1A, 1fs, kcal, K
+boundary        p p p				# 3D periodic
+box             tilt large 			# triclinic (non-orthogonal) simulation boxes
+
+atom_style      full				# full: molecular and charge
+
+pair_style      lj/cut 12.50		# cutoff Lennard-Jones potential with no Coulomb
+pair_modify     tail yes mix arithmetic 	# tail and mix method
+special_bonds   lj/coul 0.0 0.0 1.0			# ??
+dielectric      1.0					# dielectric constant for Coulombic interactions
+
+read_data       data.COF			# load structures
+replicate       1 1 1				# create supercell
+
+#### Atom Groupings ####
+group           CH4      type    10
+group           fram     type    1:9
+#### END Atom Groupings ####
+
+#### SETTINGS ####
+variable        teq   equal 200000000# equlibrate time 1ns
+variable        tdc   equal 10000000
+variable        stemp equal 298.000000
+variable        rsd   equal 36579
+variable        nmol  equal 16
+
+variable        dt     equal 1.00	# dt = 1fs
+variable        tdamp  equal 100*${dt}
+
+compute         CH4Temp CH4 temp	# compute temp of CH4
+thermo_style    custom step temp etotal ke pe epair emol press	# print thermo info
+thermo_modify   temp CH4Temp		# moniter the temp of CH4, due to the rigid appox
+#### END SETTINGS ####
+
+## deposit							# use langevin and nve dynamics to deposit
+molecule        CH4 CH4.molecule 	# !!atom type
+fix             1 CH4 rigid/small molecule langevin ${stemp} ${stemp} ${tdamp} ${rsd} mol CH4
+fix             2 CH4 langevin 0.00 0.00 ${tdamp} ${rsd}
+fix             3 CH4 nve
+# fix             4 all momentum 1 linear 1 1 1 angular
+region          cell block 0 EDGE 0 EDGE 0 EDGE units lattice
+fix             5 CH4 deposit ${nmol} 0 500 ${rsd} region cell near 2.00 mol CH4 rigid 1
+thermo          10000
+run             1000000
+unfix           1
+unfix           2
+unfix           3
+unfix           5
+
+## equilibrate
+reset_timestep  0
+fix             1 CH4 nvt temp ${stemp} ${stemp} ${tdamp}
+# neigh_modify    exclude group CH4 CH4
+run             ${teq}
+
+## data collection
+reset_timestep  0
+# dump            file1 all custom 100  dump.lammpstrj id type x  y  z
+# compute 		1 CH4 mometum
+dump            file2 CH4 custom 1000 CH4_coords.dat id type xs ys zs ix iy iz
+dump            file3 CH4 custom 1000 CH4_velocities.dat id type vx vy vz fx fy fz
+# restart         ${teq} file.restart
+run             ${tdc}
