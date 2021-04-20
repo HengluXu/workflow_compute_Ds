@@ -1,0 +1,124 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{upgreek}
+\usepackage{physics}
+\usepackage[version=4]{mhchem}
+\usepackage{braket}
+\usepackage{esvect}
+
+% \graphicspath{{figure/}}
+\usepackage{booktabs}
+\usepackage{multirow}
+
+\newcommand{\reftab}[1]{\textbf{Table~\ref{#1}}}
+\newcommand{\reffig}[1]{\textbf{Figure~\ref{#1}}}
+\newcommand{\refeq}[1]{\textbf{Equation~(\ref{#1})}}
+
+\title{DOF problem}
+\author{Henglu Xu}
+\date{\today}
+
+\begin{document}
+\section{Degree of freedom of a system with external forces}
+
+From MD simulations with different $N$(\ce{CH4}),
+we compute average kinetic energy $E_k$ of \ce{CH4} as listed in \reftab{tab:Ek_nCH4}.
+
+\begin{table}[htbp]
+    \centering
+    \caption{Average $E_k$ of \ce{CH4} for different $N$(\ce{CH4})}
+    \label{tab:Ek_nCH4}
+    %in MD tests of $n$(\ce{CH4})
+    \begin{tabular}{ccclcl}
+    \toprule
+    $N$%(\ce{CH4})
+    & $\frac{E_k}{N}$~(kJ/mol)\\
+    % & percentage error\\
+    \midrule
+     4  & 2.78 \\   %& -25.0\% \\
+     8  & 3.23 \\   %& -12.6\% \\
+    16  & 3.48 \\   %&  -6.0\% \\
+    40  & 3.61 \\   %&  -2.4\% \\
+    80  & 3.66 \\   %&  -1.1\% \\
+    100 & 3.67 \\   %& -0.74\% \\
+    120 & 3.67 \\   %& -0.72\% \\
+    140 & 3.68 \\   %& -0.73\% \\
+    160 & 3.68 \\   %& -0.45\% \\
+    \bottomrule
+    \end{tabular}
+\end{table}
+
+According to the equipartition theorem,
+energy carried from every degree of freedom~(DOF) is equal to $\frac{1}{2}k_\text{B} T$,
+and the sum of the energies for all DOF ($N_\text{DOF}\times \frac{1}{2}k_\text{B} T$), is equal to total kinetic energy $E_k$.
+From this discussion, we obtain the relation between total kinetic energy $E_k$ and temperature $T$ as \refeq{eq:dof_thm}.
+To calculate total DOF ($N_\text{DOF}$) of \ce{CH4} group, we assume it has the form of "$N_\text{DOF}=aN-b$" and perform a linear regression with data of $E_k$ and $N$ from \reftab{tab:Ek_nCH4}, $T$=298~K,
+$N_\text{DOF}$ is equal to $3N-3$ (\refeq{eq:dof_value}).
+
+\begin{align}
+    \label{eq:dof_thm}
+    &E_k=\sum^i_N \frac{1}{2}mv^2_i
+    =\frac{1}{2} k_\text{B} T \times N_\text{DOF}\\
+    \label{eq:dof_value}
+    &N_\text{DOF}
+    =3.01\times N-3.00
+\end{align}
+
+This result supports the idea that the calculation of degrees of freedom in LAMMPS is implemented in a way which keeps total linear momentum conserved and center of mass (COM) fixed,
+despite of the existence of an external force field.
+This correction of DOF has an effect on the velocities of \ce{CH4}, and, consequently, on the $E_k$ distribution.
+
+The conservation of total linear momentum determines total DOF of \ce{CH4} is equal to $3N-3$ instead of $3N$, which cause the anomalous relation.
+Indeed, to use the correct DOF estimation, we modify the source codes of LAMMPS related to the DOF calculations in the NVT simulation.
+
+\begin{verbatim}
+Lammps-version/src/:
+    fix_nvt.cpp         \*call fix_nh.cpp*\
+    fix_nh.cpp:         \*call "dof" variable from compute_temp.cpp*\
+                        tdof=temperature->dof
+                        kecurrent=tdof*boltz*t_current
+    compute.cpp:        \*set default value of "extra_dof"*\
+                                \*and "fix_dof"*\
+                        extra_dof=domain->dimension
+                        fix_dof=0
+    compute_temp.cpp:   \*definition of "dof" variable*\
+                        dof=domain->dimension*natoms_temp
+                        dof-=extra_dof+fix_dof
+\end{verbatim}
+
+For using Nose-Hoover thermostat, four \texttt{*.cpp} files are the most relevant.
+\texttt{fix\_nvt.cpp} and \texttt{fix\_nh.cpp} include all implementations of Nose-Hoover thermostat, and refer to variable \texttt{dof} to compute $E_k$.
+\texttt{compute.cpp} and \texttt{compute\_*.cpp} include implementations of computation of certain property, e.g.\ \texttt{compute\_temp.cpp} for temperature calculation.
+
+In \texttt{compute\_temp.cpp}, we find the definition of $N$(\ce{CH4}) for a 3-dimensional system,
+\texttt{dof=3N-extra\_dof-fix\_dof}.
+In \texttt{compute.cpp}, default value of \texttt{extra\_dof} is assigned to be equal to dimension, i.e.\ 3 for 3-dimensional system.
+
+In conclusion, LAMMPS assigns the total DOF of our system to be ($3N-3$) instead of $3N$, which causes the lower total kinetic energy $E_k$ compared to the reference value, 3.70 kJ/mol (\refeq{eq:3.7}), and incorrect $E_k$ distribution compared to the reference canonical distribution (\refeq{eq:PvsE}).
+
+\begin{align}
+    &\textbf{Canonical distribution at 298~K} \nonumber \\
+    \label{eq:3.7}
+    &E_k~\text{per mol}
+    =\frac{3}{2}k_\text{B} T N_\text{A}=3.70~\text{kJ/mol}\\%\quad\text{for 298~K}\\
+    \label{eq:PvsE}
+    &P=2\left(\frac{E}{\pi}\right)^{\frac{1}{2}} \left(\frac{1}{k_BT}\right)^\frac{3}{2} \exp{-\frac{E}{k_BT}}
+\end{align}
+
+In other words, when we perform a NVT simulation at 298~K using LAMMPS, the target temperature is never achieved,
+more significant for small numbers of guest molecules, due to loss of energies of 3 DOF,
+and, in addition, the effective temperature of our simulation is $T_\text{eff}=\frac{N-1}{N}\times 298~\text{K}$.
+%When $N$ is smaller than 40~\ce{CH4},
+The effective temperature $T_\text{eff}$ is lower than the imposed one, leading to slower diffusion of \ce{CH4} and smaller diffusion coefficients $D_s$, which explains the anomalous relation between $N$(\ce{CH4}) and $D_s$.
+
+To obtain the correct results of $D_s$ at 298~K, we modify \texttt{compute\_temp.cpp},
+use \texttt{dof=3N-fix\_dof}
+instead of \texttt{dof=3N-extra\_dof-fix\_dof}.
+By removing \texttt{extra\_dof} variable, LAMMPS is able to calculate the total DOF of \ce{CH4} as $3N$.
+
+The modifed Lammps is available in
+`https://github.com/HengluXu/lammps.git`
+%
+\end{document}

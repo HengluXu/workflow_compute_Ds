@@ -1,0 +1,3 @@
+# ignore tex compile files
+*/main.*
+!*/main.tex
